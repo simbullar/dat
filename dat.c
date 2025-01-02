@@ -8,43 +8,89 @@
 
 struct stat st = {0};
 
+// Function to get the directory of a specific wiki from wikis.txt
+int get_wiki_dir(const char *wiki_name, char *wiki_dir) {
+    FILE *file = fopen("/var/dat/wikis.txt", "r");
+    if (file == NULL) {
+        perror("Error opening wikis.txt");
+        return 1;
+    }
+
+    char line[1024];
+    const char delim[] = "::";
+    while (fgets(line, sizeof(line), file)) {
+        line[strcspn(line, "\n")] = 0;  // Remove the newline character
+        char *token = strtok(line, delim);
+
+        // If the wiki name matches, return the directory path
+        if (strcmp(token, wiki_name) == 0) {
+            token = strtok(NULL, delim);
+            strcpy(wiki_dir, token);  // Copy the wiki directory path
+            fclose(file);
+            return 0;
+        }
+    }
+
+    fclose(file);
+    printf("Wiki '%s' not found.\n", wiki_name);
+    return 1;
+}
+
 // Function to create a part (file)
-int add_part(char *name) {
-    FILE *fptr;
-    char file_name[256];  // Buffer for file name
+// Function to create a part (file) in a specific wiki
+int add_part(char *page_name, char *wiki_name) {
+    char wiki_dir[256];
+    if (get_wiki_dir(wiki_name, wiki_dir) != 0) {
+        return 1;  // Wiki not found
+    }
 
-    // Create the file name by appending ".txt" to the name
-    snprintf(file_name, sizeof(file_name), "%s.txt", name);
+    // Build the full file path for the page
+    char file_name[512];
+    snprintf(file_name, sizeof(file_name), "%s/docs/%s.txt", wiki_dir, page_name);
 
-    // Open the file for writing
-    fptr = fopen(file_name, "w");
+    // Check if the directory exists
+    if (stat(wiki_dir, &st) == -1) {
+        printf("Wiki directory '%s' does not exist.\n", wiki_dir);
+        return 1;
+    }
+
+    // Create the file
+    FILE *fptr = fopen(file_name, "w");
     if (fptr == NULL) {
         perror("Error creating file");
-        return 1;  // Return an error code
+        return 1;
     }
+    fclose(fptr);
 
-    fclose(fptr);  // Close the file
-    printf("Page '%s' created successfully!\n", file_name);
+    printf("Page '%s' created successfully in wiki '%s'!\n", file_name, wiki_name);
     return 0;
 }
+
 
 // Function to edit a part (file)
-int edit_part(char *file_name) {
-    printf("Editing file: %s\n", file_name);
-
-    FILE *fptr = fopen(file_name, "a");  // Open file in append mode
-    if (fptr == NULL) {
-        perror("Error opening file");
-        return 1;  // Return an error code
+int edit_part(char *wiki_name, char *file_name) {
+    char wiki_dir[256];
+    if (get_wiki_dir(wiki_name, wiki_dir) != 0) {
+        return 1;  // Wiki not found
     }
 
-    // Example content to append (you can modify this for real editing)
-    fprintf(fptr, "Adding some example content...\n");
+    // Build the full file path for the part
+    char file_path[512];
+    snprintf(file_path, sizeof(file_path), "%s/docs/%s.txt", wiki_dir, file_name);
 
-    fclose(fptr);  // Close the file
-    printf("File '%s' edited successfully!\n", file_name);
+    // Open the file for appending
+    FILE *fptr = fopen(file_path, "a");
+    if (fptr == NULL) {
+        perror("Error opening file");
+        return 1;
+    }
+    fprintf(fptr, "Adding some example content...\n");
+    fclose(fptr);
+
+    printf("File '%s' edited successfully in wiki '%s'!\n", file_path, wiki_name);
     return 0;
 }
+
 int print_wikis(){
     FILE *file = fopen("/var/dat/wikis.txt", "r"); // Open the file in read mode
         if (file == NULL) {
@@ -76,7 +122,6 @@ int init_config() {
     printf("Choose a directory for your wiki: \n");
     scanf("%s", path);
 
-    // Check if the directory exists
     if (stat(path, &st) == -1) {
         printf("No such directory. Please create it first.\n");
         return 1;
@@ -85,115 +130,112 @@ int init_config() {
     printf("Input the name for the wiki: \n");
     scanf("%s", name);
 
-    // Construct paths for wiki directory and docs directory
     snprintf(wiki_dir, sizeof(wiki_dir), "%s/%s", path, name);
     snprintf(docs_dir, sizeof(docs_dir), "%s/docs", wiki_dir);
 
-    // Create the wiki directory
-    if (mkdir(wiki_dir, 0777) == -1) {
-        perror("Error creating wiki directory");
-        return 1;
-    }
+    // Create directories
+    mkdir(wiki_dir, 0777);
+    mkdir(docs_dir, 0777);
 
-    // Create the docs directory
-    if (mkdir(docs_dir, 0777) == -1) {
-        perror("Error creating docs directory");
-        return 1;
-    }
-
-    // Create the main wiki file
     char wiki_file[256];
     snprintf(wiki_file, sizeof(wiki_file), "%s/wiki.txt", wiki_dir);
 
     fptr = fopen(wiki_file, "w");
     if (fptr == NULL) {
-        perror("Error creating main wiki file");
+        perror("Error creating wiki file");
         return 1;
     }
 
     fprintf(fptr, "Welcome to your wiki: %s\n", name);
     printf("Enter the description for your new wiki: \n");
-    scanf(" %[^\n]", description); // Read full line for description
+    scanf(" %[^\n]", description);
     fprintf(fptr, "%s\n", description);
-
     fclose(fptr);
 
-    // Append to global wikis file
     config = fopen("/var/dat/wikis.txt", "a");
     if (config == NULL) {
-        perror("Error opening global wikis file");
+        perror("Error opening wikis.txt");
         return 1;
     }
-    fprintf(config, "%s::%s\n", name, wiki_dir); // Write wiki name and path
+    fprintf(config, "%s::%s\n", name, wiki_dir);
     fclose(config);
 
-    printf("Wiki '%s' initialized successfully at '%s'!\n", name, path);
+    printf("Wiki '%s' initialized successfully at '%s'.\n", name, path);
     return 0;
 }
-
-
 int initial() {
     FILE *fptr;
     if (stat("/var/dat", &st) == -1) {
         mkdir("/var/dat", 0777);  // Create /var/dat directory
         fptr = fopen("/var/dat/wikis.txt", "w");  // Create wikis.txt
         if (fptr) fclose(fptr);
-        printf("Added the init files.\n");
+        printf("Initialization: Created '/var/dat' and 'wikis.txt'.\n");
     } else if (stat("/var/dat/wikis.txt", &st) == -1) {
         fptr = fopen("/var/dat/wikis.txt", "w");
         if (fptr) fclose(fptr);
-        printf("Added the wiki files.\n");
+        printf("Initialization: Added 'wikis.txt'.\n");
     } else {
-        printf("The files are already there.\n");
+        printf("Initialization: All files and directories already exist.\n");
     }
     return 0;
 }
-
-
 int main(int argc, char *argv[]) {
     int opt;
-    char *tValue = NULL;
+    char *page_name = NULL;
+    char *wiki_name = NULL;
 
     static struct option long_options[] = {
-        {"init", no_argument, NULL, 'i'},      // Initialize global config
         {"newwiki", no_argument, NULL, 'n'},  // Create a new wiki
         {"help", no_argument, NULL, 'h'},     // Show help
-        {"add", required_argument, NULL, 'a'}, // Add a new part
+        {"add", required_argument, NULL, 'a'}, // Add a new part (page)
         {"edit", required_argument, NULL, 'e'}, // Edit a part
+        {"wiki", required_argument, NULL, 'w'}, // Specify the wiki name
         {NULL, 0, NULL, 0}                    // End of the options list
     };
 
-    while ((opt = getopt_long(argc, argv, "a:e:h", long_options, NULL)) != -1) {
+    while ((opt = getopt_long(argc, argv, "a:e:h:nw:", long_options, NULL)) != -1) {
         switch (opt) {
             case 'a':
-                tValue = optarg;
-                add_part(tValue);
+                page_name = optarg;  // Get the name of the page to add
+                if (optind < argc) {
+                    wiki_name = argv[optind];  // Get the wiki name
+                    add_part(page_name, wiki_name);  // Add page in the specified wiki
+                } else {
+                    fprintf(stderr, "Error: Missing wiki name.\n");
+                    return 1;
+                }
                 break;
 
             case 'e':
-                tValue = optarg;
-                edit_part(tValue);
+                page_name = optarg;  // Get the page name to edit
+                if (optind < argc) {
+                    wiki_name = argv[optind];  // Get the wiki name
+                    edit_part(wiki_name, page_name);  // Edit page in the specified wiki
+                } else {
+                    fprintf(stderr, "Error: Missing wiki name.\n");
+                    return 1;
+                }
                 break;
 
             case 'h':
                 printf("Here are your options:\n");
-                printf(" '--help' - Show this help panel\n");
-                printf(" '--init' - Initialize global configuration\n");
-                printf(" '--newwiki' - Create a new wiki\n");
-                printf(" '--add <name>' - Add a new page\n");
-                printf(" '--edit <file_name>' - Edit an existing page\n");
+                printf(" --help           Show this help panel\n");
+                printf(" --newwiki        Create a new wiki\n");
+                printf(" --add <PageName> <WikiName>  Add a new page\n");
+                printf(" --edit <PageName> <WikiName> Edit an existing page\n");
+                printf(" --wiki <name>    Specify the wiki for editing\n");
                 return 0;
 
             case 'n':
                 init_config();
                 break;
 
-            case 'i':
-                initial();
+            case 'w':
+                wiki_name = optarg;  // Specify the wiki name for editing
                 break;
 
             default:
-                fprintf(stderr, "Usage: %s [--add name] [--edit file_name] [--init] [--help]\n", argv[0]);
+                fprintf(stderr, "Usage: %s [--add PageName WikiName] [--edit PageName WikiName] [--newwiki] [--help] [--wiki name]\n", argv[0]);
                 return 1;
         }
     }
